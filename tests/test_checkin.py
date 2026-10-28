@@ -89,6 +89,44 @@ class CheckinResultTests(unittest.TestCase):
 
 
 class BrowserHeaderTests(unittest.TestCase):
+    def test_captured_hints_replace_generated_values_without_duplicates(self):
+        captured = {
+            'sec-ch-ua': '"Google Chrome";v="154", "Not=A?Brand";v="24"',
+            'accept-language': 'zh-CN,zh;q=0.9',
+            'priority': 'u=1, i',
+        }
+        with mock.patch.dict(os.environ, {'GLADOS_BROWSER_HEADERS': json.dumps(captured)}):
+            headers = checkin.get_browser_headers()
+
+        self.assertEqual(headers['Sec-CH-UA'], captured['sec-ch-ua'])
+        self.assertEqual(headers['Accept-Language'], captured['accept-language'])
+        self.assertEqual(headers['Priority'], captured['priority'])
+        self.assertNotIn('sec-ch-ua', headers)
+
+    def test_invalid_profiles_do_not_expose_values_or_override_authentication(self):
+        for raw in ('not-json', '[]', '{"Cookie":"secret"}', '{"Host":"other.example"}',
+                    '{"priority":"u=1\\r\\nCookie: secret"}', '{"priority":1}'):
+            with self.subTest(raw=raw):
+                with mock.patch.dict(os.environ, {'GLADOS_BROWSER_HEADERS': raw}):
+                    with self.assertRaises(ValueError) as failure:
+                        checkin.get_browser_headers()
+                self.assertNotIn('secret', str(failure.exception))
+
+    @mock.patch('checkin.requests.post')
+    def test_captured_headers_keep_session_and_api_origin(self, request_post):
+        response = mock.Mock(status_code=200)
+        response.json.return_value = {'code': 0, 'message': 'Checkin! Got 15 Points'}
+        request_post.return_value = response
+        cookie = 'gld:sess=test; gld:sess.sig=test-signature'
+        with mock.patch.dict(os.environ, {'GLADOS_BROWSER_HEADERS': '{"priority":"u=1, i"}'}):
+            checkin.GLaDOS(cookie).checkin()
+
+        sent = request_post.call_args.kwargs['headers']
+        self.assertEqual(sent['Priority'], 'u=1, i')
+        self.assertEqual(sent['Cookie'], cookie)
+        self.assertEqual(sent['Origin'], 'https://glados.cloud')
+        self.assertEqual(sent['Referer'], 'https://glados.cloud/console/checkin')
+
     def test_custom_chrome_user_agent_builds_matching_client_hints(self):
         user_agent = (
             'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
