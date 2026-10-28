@@ -153,7 +153,9 @@ def get_cookies():
 
 
 def get_browser_headers():
-    """Build headers matching the browser that created the login session."""
+    """
+    按登录浏览器身份生成请求头并合并实际抓取的浏览器请求头
+    """
     user_agent = os.environ.get("GLADOS_USER_AGENT", "").strip() or DEFAULT_USER_AGENT
     headers = {'User-Agent': user_agent}
 
@@ -180,6 +182,38 @@ def get_browser_headers():
             'Sec-CH-UA-Mobile': '?1' if 'Mobile' in user_agent else '?0',
             'Sec-CH-UA-Platform': f'"{platform}"',
         })
+
+    raw_headers = os.environ.get('GLADOS_BROWSER_HEADERS', '').strip()
+    if raw_headers:
+        allowed = {
+            'accept': 'Accept',
+            'accept-language': 'Accept-Language',
+            'sec-ch-ua': 'Sec-CH-UA',
+            'sec-ch-ua-mobile': 'Sec-CH-UA-Mobile',
+            'sec-ch-ua-platform': 'Sec-CH-UA-Platform',
+            'sec-ch-ua-full-version-list': 'Sec-CH-UA-Full-Version-List',
+            'sec-ch-ua-platform-version': 'Sec-CH-UA-Platform-Version',
+            'sec-ch-ua-arch': 'Sec-CH-UA-Arch',
+            'sec-ch-ua-bitness': 'Sec-CH-UA-Bitness',
+            'sec-ch-ua-model': 'Sec-CH-UA-Model',
+            'sec-ch-ua-wow64': 'Sec-CH-UA-WoW64',
+            'priority': 'Priority',
+            'dnt': 'DNT',
+            'sec-gpc': 'Sec-GPC',
+        }
+        try:
+            captured = json.loads(raw_headers)
+        except (ValueError, TypeError):
+            raise ValueError('GLADOS_BROWSER_HEADERS 必须为 JSON 对象') from None
+        if not isinstance(captured, dict):
+            raise ValueError('GLADOS_BROWSER_HEADERS 必须为 JSON 对象')
+        for name, value in captured.items():
+            canonical = allowed.get(name.lower())
+            if canonical is None or not isinstance(value, str) or not value.strip():
+                raise ValueError('GLADOS_BROWSER_HEADERS 含不支持的请求头或无效值')
+            if any(ord(character) < 32 or ord(character) > 126 for character in value):
+                raise ValueError('GLADOS_BROWSER_HEADERS 含无效请求头字符')
+            headers[canonical] = value
 
     return headers
 
